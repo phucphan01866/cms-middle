@@ -53,9 +53,9 @@ app.use((req, res, next) => {
             }
         }
 
-        if (body && Object.keys(body).length > 0) {
-            console.log(`Body: ${JSON.stringify(body, null, 2)}`);
-        }
+        // if (body && Object.keys(body).length > 0) {
+        //     console.log(`Body: ${JSON.stringify(body, null, 2)}`);
+        // }
     });
 
     next();
@@ -74,16 +74,18 @@ app.post('/api/v1/login', async (req, res) => {
 
     // Nếu không có URL Backend, fallback về code cũ
     if (!CMS_BE_URL) {
-        return res.status(201).send({ data: { "accessToken": "" } });
+        console.log("--- No CMS URL, using no CMS mode ---")
+        return res.status(201).send({ data: { "accessToken": "placeholder" } });
     }
 
     try {
         const response = await axios.post(`${CMS_BE_URL}/api/v1/login`, req.body);
+        if (response.status !== 201) { console.log("--- Login failed, no CMS mode ---") } else { console.log("---Login success, CMS mode ---") }
         return res.status(response.status).send(response.data);
     } catch (error) {
         console.error(`Forwarding login failed (${CMS_BE_URL}), falling back to dummy response. Error:`, error.message);
         // Fallback khi lỗi 
-        return res.status(201).send({ data: { "accessToken": "" } });
+        return res.status(201).send({ data: { "accessToken": "placeholder" } });
     }
 });
 
@@ -119,11 +121,20 @@ app.post('/api/v1/devices', async (req, res) => {
     }
 });
 
-app.post('/api/v1/logs', (req, res) => {
-    // Luôn trả về thành công cho logs, đang cấu hình in logs ra file ở trên
-    return res.status(201).send({
-        success: true,
-    });
+app.post('/api/v1/logs', async (req, res) => {
+    const CMS_BE_URL = getCMSBackendURL();
+
+    if (!CMS_BE_URL) {
+        return res.status(201).send({ success: true });
+    }
+
+    try {
+        const response = await axios.post(`${CMS_BE_URL}/api/v1/logs`, req.body);
+        return res.status(response.status).send(response.data);
+    } catch (error) {
+        console.error(`Forwarding logs failed (${CMS_BE_URL}), falling back. Error:`, error.message);
+        return res.status(201).send({ success: true });
+    }
 });
 
 app.listen(port, () => {
