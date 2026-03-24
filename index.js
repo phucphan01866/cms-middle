@@ -125,6 +125,7 @@ app.post('/api/v1/logs', async (req, res) => {
     const CMS_BE_URL = getCMSBackendURL();
 
     if (!CMS_BE_URL) {
+        console.log("--- No CMS URL, using no CMS mode ---")
         return res.status(201).send({ success: true });
     }
 
