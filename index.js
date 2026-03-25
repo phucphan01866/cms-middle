@@ -5,6 +5,8 @@ const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
 const fs = require('fs');
+const { createServer } = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
 const port = process.env.THIS_PORT || 5050;
@@ -13,33 +15,27 @@ app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 
+// Middleware log chi tiết các request đi tới
+app.use((req, res, next) => {
+  const now = new Date().toISOString();
+  console.log(`[${now}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
+  // if (req.method === 'POST' && Object.keys(req.body).length > 0) {
+  //   console.log('Request Body:', JSON.stringify(req.body, null, 2));
+  // }
+  next();
+});
+
 // Helper to get backend URL
 const getCMSBackendURL = () => {
   const ip = process.env.BE_CMS_IP;
   const port = process.env.BE_CMS_PORT;
+  if (!ip || !port) console.log("IP or Port is not defined, using no CMS mode")
   return ip && port ? `http://${ip}:${port}` : null;
 };
 
-// Generic forwarder
-const forward = (path, fallback) => {
-  app.post(path, async (req, res) => {
-    const CMS_BE_URL = getCMSBackendURL();
-    if (!CMS_BE_URL) return res.status(201).send(fallback);
-    try {
-      const response = await axios.post(`${CMS_BE_URL}${path}`, req.body);
-      return res.status(response.status).send(response.data);
-    } catch (error) {
-      return res.status(201).send(fallback);
-    }
-  });
-};
-
-
-// Định nghĩa các route đã khai báo riêng
+// Định nghĩa các route đã khai báo riêng (3 route đầu để xác thực với SVMS)
 const declaredRoutes = [
   '/api/v1/login',
-  '/api/v1/server',
-  '/api/v1/devices',
   '/api/v1/logs',
   '/healthcheck'
 ];
@@ -86,8 +82,8 @@ app.post('/api/v1/logs', async (req, res) => {
   };
   try {
     fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
-  } catch {}
-
+  } catch { }
+  io.emit("receive-log", logData);
   const CMS_BE_URL = getCMSBackendURL();
   if (!CMS_BE_URL) return res.status(201).send({ success: true });
   try {
@@ -100,6 +96,31 @@ app.post('/api/v1/logs', async (req, res) => {
 
 app.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
 
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+// app.listen(port, () => {
+//   console.log(`Server running at http://localhost:${port}`);
+// });
+
+
+// Socket config
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*", // Cho phép FE kết nối
+    methods: ["GET", "POST"]
+  }
+});
+io.on('connection', (socket) => {
+  console.log('Một user đã kết nối:', socket.id);
+  socket.on('message', (data) => {
+    console.log('Nhận tin nhắn:', data);
+    // Gửi lại cho tất cả mọi người
+    io.emit('message', data);
+  });
+  socket.on('disconnect', () => {
+    console.log('User đã ngắt kết nối');
+  });
+});
+// THAY ĐỔI: Sử dụng httpServer.listen và lắng nghe trên 0.0.0.0 để thiết bị khác có thể kết nối
+httpServer.listen(port, '0.0.0.0', () => {
+  console.log(`Server & Socket running at http://0.0.0.0:${port}`);
 });
