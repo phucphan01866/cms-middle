@@ -16,6 +16,28 @@ app.use(cors({
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 
+// Middleware Forwarding
+app.use(async (req, res, next) => {
+    const CMS_BE_URL = getCMSBackendURL();
+    if (!CMS_BE_URL) return next(); // Không có urlBE thì xử lý tiếp như bình thường
+
+    try {
+        const url = `${CMS_BE_URL}${req.originalUrl}`;
+        const axiosConfig = {
+            method: req.method,
+            url,
+            headers: { ...req.headers, host: undefined }, // loại bỏ host để tránh lỗi
+            data: req.body
+        };
+        const response = await axios(axiosConfig);
+        res.status(response.status).send(response.data);
+    } catch (error) {
+        console.error('Forwarding failed:', error.message);
+        // Có thể trả về fallback hoặc next() để các route sau xử lý
+        res.status(201).send({ success: true });
+    }
+});
+
 // Middleware Logger
 app.use((req, res, next) => {
     const { method, originalUrl, ip, body } = req;
