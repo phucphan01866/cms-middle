@@ -11,6 +11,24 @@ const { Server } = require('socket.io');
 const app = express();
 const port = process.env.THIS_PORT || 5050;
 
+const getURL = (part1, part2) => {
+  if (part1 && part2) return `http://${part1}:${part2}`;
+  return null;
+}
+
+const getCMSBackendURL = () => {
+  return getURL(process.env.BE_CMS_IP, process.env.BE_CMS_PORT);
+}
+
+const getForwardURL = () => {
+  return getURL(process.env.FORWARD_IP, process.env.FORWARD_PORT);
+}
+
+const forward_list = [
+  getCMSBackendURL(),
+  getForwardURL()
+].filter(Boolean);
+
 app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
@@ -25,32 +43,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Helper to get backend URL
-const getCMSBackendURL = () => {
-  const ip = process.env.BE_CMS_IP;
-  const port = process.env.BE_CMS_PORT;
-  if (!ip || !port) console.log("IP or Port is not defined, using no CMS mode")
-  return ip && port ? `http://${ip}:${port}` : null;
-};
+// Helpers have been moved to the top
 
-// Định nghĩa các route đã khai báo riêng (3 route đầu để xác thực với SVMS)
+// Định nghĩa các route đã khai báo riêng
 const declaredRoutes = [
   '/api/v1/login',
   '/api/v1/logs',
   '/healthcheck'
 ];
-
-// Route login riêng (vì có fallback đặc biệt)
-app.post('/api/v1/login', async (req, res) => {
-  const CMS_BE_URL = getCMSBackendURL();
-  if (!CMS_BE_URL) return res.status(201).send({ data: { accessToken: 'placeholder' } });
-  try {
-    const response = await axios.post(`${CMS_BE_URL}/api/v1/login`, req.body);
-    return res.status(response.status).send(response.data);
-  } catch {
-    return res.status(201).send({ data: { accessToken: 'placeholder' } });
-  }
-});
 
 // Middleware chung forward các POST request chưa khai báo
 app.use(async (req, res, next) => {
@@ -63,6 +63,17 @@ app.use(async (req, res, next) => {
     return res.status(response.status).send(response.data);
   } catch {
     return res.status(201).send({ success: true });
+  }
+});
+
+app.post('/api/v1/login', async (req, res) => {
+  const CMS_BE_URL = getCMSBackendURL();
+  if (!CMS_BE_URL) return res.status(201).send({ data: { accessToken: 'placeholder' } });
+  try {
+    const response = await axios.post(`${CMS_BE_URL}/api/v1/login`, req.body);
+    return res.status(response.status).send(response.data);
+  } catch {
+    return res.status(201).send({ data: { accessToken: 'placeholder' } });
   }
 });
 
@@ -84,14 +95,16 @@ app.post('/api/v1/logs', async (req, res) => {
     fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
   } catch { }
   io.emit("receive-log", logData);
-  const CMS_BE_URL = getCMSBackendURL();
-  if (!CMS_BE_URL) return res.status(201).send({ success: true });
-  try {
-    const response = await axios.post(`${CMS_BE_URL}/api/v1/logs`, req.body);
-    return res.status(response.status).send(response.data);
-  } catch {
-    return res.status(201).send({ success: true });
+  if (forward_list.length === 0) return res.status(201).send({ success: true });
+
+  for (const url of forward_list) {
+    try {
+      await axios.post(`${url}/api/v1/logs`, req.body);
+    } catch (error) {
+      console.error(`Log forwarding error to ${url}:`, error.message);
+    }
   }
+  return res.status(201).send({ success: true });
 });
 
 app.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
