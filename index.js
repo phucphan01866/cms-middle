@@ -7,10 +7,12 @@ const axios = require('axios');
 const fs = require('fs');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
+const { io: ioClient } = require('socket.io-client'); // Added: Socket.io Client for server-to-server connection
 
 const app = express();
 const port = process.env.THIS_PORT || 5050;
 
+// ... (existing URL helpers)
 const getURL = (part1, part2) => {
   if (part1 && part2) return `http://${part1}:${part2}`;
   return null;
@@ -29,7 +31,26 @@ const forward_list = [
   getForwardURL()
 ].filter(Boolean);
 
+// --- Initialize Socket Connections to Forward Targets ---
+const forwardSockets = [];
+forward_list.forEach(url => {
+  console.log(`[SOCKET_SYSTEM] Creating persistent link to: ${url}`);
+  const socket = ioClient(url, {
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 2000
+  });
+
+  socket.on('connect', () => console.log(`[SOCKET_SYSTEM] Connected successfully to ${url}`));
+  socket.on('connect_error', (err) => console.log(`[SOCKET_SYSTEM] Connection error to ${url}:`, err.message));
+  socket.on('disconnect', () => console.log(`[SOCKET_SYSTEM] Disconnected from ${url}`));
+
+  forwardSockets.push({ url, socket });
+});
+
 app.use(cors({ origin: true, credentials: true }));
+// ... (rest of middlewares remain same)
+
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 
@@ -37,13 +58,8 @@ app.use(express.json({ limit: '50mb' }));
 app.use((req, res, next) => {
   const now = new Date().toISOString();
   console.log(`[${now}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
-  // if (req.method === 'POST' && Object.keys(req.body).length > 0) {
-  //   console.log('Request Body:', JSON.stringify(req.body, null, 2));
-  // }
   next();
 });
-
-// Helpers have been moved to the top
 
 // Định nghĩa các route đã khai báo riêng
 const declaredRoutes = [
@@ -104,14 +120,27 @@ app.post('/api/v1/logs', async (req, res) => {
     }
     fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
   } catch { }
+
+  // 1. Emit to local connected clients (e.g., Browser)
   io.emit("receive-log", logData);
+
+  // 2. Emit via Socket to Forward Targets (Real-time Link)
+  forwardSockets.forEach(({ url, socket }) => {
+    if (socket.connected) {
+      console.log(`[SOCKET_FORWARD] Pushing log to: ${url}`);
+      socket.emit("forward-log", logData);
+    }
+  });
+
   if (forward_list.length === 0) return res.status(201).send({ success: true });
 
+  // 3. Keep fallback HTTP forwarding
   for (const url of forward_list) {
     try {
       await axios.post(`${url}/api/v1/logs`, req.body);
     } catch (error) {
-      console.error(`Log forwarding error to ${url}:`, error.message);
+      // If socket failed, maybe HTTP still works or vice versa
+      console.error(`Log forwarding (HTTP) error to ${url}:`, error.message);
     }
   }
   return res.status(201).send({ success: true });
@@ -119,31 +148,35 @@ app.post('/api/v1/logs', async (req, res) => {
 
 app.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
 
-// app.listen(port, () => {
-//   console.log(`Server running at http://localhost:${port}`);
-// });
-
-
-// Socket config
+// Socket configuration for INCOMING connections
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", // Cho phép FE kết nối
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
+
 io.on('connection', (socket) => {
-  console.log('Một user đã kết nối:', socket.id);
+  console.log('Một user/server đã kết nối:', socket.id);
+
+  // Handle incoming forwarded logs from other servers
+  socket.on('forward-log', (data) => {
+    console.log('[SOCKET_INCOMING] Received forwarded log from another server');
+    io.emit('receive-log', data); // Broadcast it to our local connected UI
+  });
+
   socket.on('message', (data) => {
     console.log('Nhận tin nhắn:', data);
-    // Gửi lại cho tất cả mọi người
     io.emit('message', data);
   });
+
   socket.on('disconnect', () => {
-    console.log('User đã ngắt kết nối');
+    console.log('User/server đã ngắt kết nối');
   });
 });
-// THAY ĐỔI: Sử dụng httpServer.listen và lắng nghe trên 0.0.0.0 để thiết bị khác có thể kết nối
+
+// START SERVER
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server & Socket running at http://0.0.0.0:${port}`);
 });
