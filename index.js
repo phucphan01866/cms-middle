@@ -104,7 +104,6 @@ app.post('/api/v1/logs', async (req, res) => {
     originalUrl: req.originalUrl,
     statusCode: res.statusCode,
     ip: req.ip,
-    duration: 0,
     body: req.body
   };
   try {
@@ -156,7 +155,35 @@ const io = new Server(httpServer, {
     methods: ["GET", "POST"]
   }
 });
+const os = require('os');
+app.get('/server-information', (req, res) => {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name in interfaces) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        addresses.push(iface.address);
+      }
+    }
+  }
+  const sendDic = [
+    { ip: process.env.FORWARD_IP, port: process.env.FORWARD_PORT, mode: 'send' },
+  ]
+  const receiveDic = [
+    // { ip: '123.456.1.123', port: process.env. }
+  ]
 
+
+
+
+  res.status(200).send({
+    ip: addresses[0] || '127.0.0.1',
+    port: port,
+    all_ips: addresses,
+    sendDic: sendDic,
+    receiveDic: receiveDic
+  });
+});
 io.on('connection', (socket) => {
   console.log('Một user/server đã kết nối:', socket.id);
 
@@ -176,7 +203,7 @@ io.on('connection', (socket) => {
   });
 });
 
-// START SERVER
+// START SERVE
 httpServer.listen(port, '0.0.0.0', () => {
   console.log(`Server & Socket running at http://0.0.0.0:${port}`);
 });
