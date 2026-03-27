@@ -92,6 +92,16 @@ app.post('/api/v1/logs', async (req, res) => {
     body: req.body
   };
   try {
+    const files = fs.readdirSync(logsDir);
+    if (files.length >= 1000) {
+      files.sort();
+      const filesToDelete = files.slice(0, files.length - 999);
+      filesToDelete.forEach(file => {
+        try {
+          fs.unlinkSync(`${logsDir}/${file}`);
+        } catch (e) { }
+      });
+    }
     fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
   } catch { }
   io.emit("receive-log", logData);
