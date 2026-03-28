@@ -166,15 +166,14 @@ app.get('/server-information', (req, res) => {
       }
     }
   }
+  // Bổ sung lấy từ json ở đây
   const sendDic = [
-    { ip: process.env.FORWARD_IP, port: process.env.FORWARD_PORT, mode: 'send' },
+    { ip: process.env.FORWARD_IP, port: process.env.FORWARD_PORT, mode: 'send', status: "connecting" },
   ]
+  console.log(sendDic);
   const receiveDic = [
     // { ip: '123.456.1.123', port: process.env. }
   ]
-
-
-
 
   res.status(200).send({
     ip: addresses[0] || '127.0.0.1',
