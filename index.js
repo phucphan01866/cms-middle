@@ -1,74 +1,41 @@
 
 require('dotenv').config();
+
+// ─── Imports ────────────────────────────────────────────────────────────────
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
 const fs = require('fs');
+const os = require('os');
 const { createServer } = require('http');
 const { Server } = require('socket.io');
-const { io: ioClient } = require('socket.io-client'); // Added: Socket.io Client for server-to-server connection
+const { io: ioClient } = require('socket.io-client');
 
+// ─── App & Config ────────────────────────────────────────────────────────────
 const app = express();
 const port = process.env.THIS_PORT || 5050;
 
-// ... (existing URL helpers)
-const getURL = (part1, part2) => {
-  if (part1 && part2) return `http://${part1}:${part2}`;
-  return null;
-}
+// ─── URL Helpers ─────────────────────────────────────────────────────────────
+const getURL = (host, p) => (host && p ? `http://${host}:${p}` : null);
+const getCMSBackendURL = () => getURL(process.env.BE_CMS_IP, process.env.BE_CMS_PORT);
+const getForwardURL = () => getURL(process.env.FORWARD_IP, process.env.FORWARD_PORT);
 
-const getCMSBackendURL = () => {
-  return getURL(process.env.BE_CMS_IP, process.env.BE_CMS_PORT);
-}
-
-const getForwardURL = () => {
-  return getURL(process.env.FORWARD_IP, process.env.FORWARD_PORT);
-}
-
-const forward_list = [
-  getCMSBackendURL(),
-  getForwardURL()
-].filter(Boolean);
-
-// --- Initialize Socket Connections to Forward Targets ---
-const forwardSockets = [];
-forward_list.forEach(url => {
-  console.log(`[SOCKET_SYSTEM] Creating persistent link to: ${url}`);
-  const socket = ioClient(url, {
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 2000
-  });
-
-  socket.on('connect', () => console.log(`[SOCKET_SYSTEM] Connected successfully to ${url}`));
-  socket.on('connect_error', (err) => console.log(`[SOCKET_SYSTEM] Connection error to ${url}:`, err.message));
-  socket.on('disconnect', () => console.log(`[SOCKET_SYSTEM] Disconnected from ${url}`));
-
-  forwardSockets.push({ url, socket });
-});
-
+// ─── Middleware ──────────────────────────────────────────────────────────────
 app.use(cors({ origin: true, credentials: true }));
-// ... (rest of middlewares remain same)
-
 app.use(cookieParser());
 app.use(express.json({ limit: '50mb' }));
 
-// Middleware log chi tiết các request đi tới
+// Request logger
 app.use((req, res, next) => {
-  const now = new Date().toISOString();
-  console.log(`[${now}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - IP: ${req.ip}`);
   next();
 });
 
-// Định nghĩa các route đã khai báo riêng
-const declaredRoutes = [
-  '/api/v1/login',
-  '/api/v1/logs',
-  '/healthcheck'
-];
+// ─── Declared Routes (skip auto-forward) ─────────────────────────────────────
+const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck'];
 
-// Middleware chung forward các POST request chưa khai báo
+// Auto-forward undeclared POST requests to CMS backend
 app.use(async (req, res, next) => {
   if (req.method !== 'POST') return next();
   if (declaredRoutes.includes(req.path)) return next();
@@ -80,6 +47,31 @@ app.use(async (req, res, next) => {
   } catch {
     return res.status(201).send({ success: true });
   }
+});
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+app.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
+
+app.get('/server-information', (req, res) => {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name in interfaces) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) addresses.push(iface.address);
+    }
+  }
+
+  const sendDic = [
+    { ip: process.env.FORWARD_IP, port: process.env.FORWARD_PORT, mode: 'send', status: 'connecting' },
+  ];
+
+  res.status(200).send({
+    ip: addresses[0] || '127.0.0.1',
+    port,
+    all_ips: addresses,
+    sendDic,
+    receiveDic: [],
+  });
 });
 
 app.post('/api/v1/login', async (req, res) => {
@@ -94,8 +86,10 @@ app.post('/api/v1/login', async (req, res) => {
 });
 
 app.post('/api/v1/logs', async (req, res) => {
+  // ── Persist log to disk (max 1000 files) ──
   const logsDir = './logs';
   if (!fs.existsSync(logsDir)) fs.mkdirSync(logsDir);
+
   const timestamp = new Date().toISOString().replace(/:/g, '-');
   const fileName = `${logsDir}/log_${timestamp}_${Math.floor(Math.random() * 1000)}.json`;
   const logData = {
@@ -104,105 +98,139 @@ app.post('/api/v1/logs', async (req, res) => {
     originalUrl: req.originalUrl,
     statusCode: res.statusCode,
     ip: req.ip,
-    body: req.body
+    body: req.body,
   };
+
   try {
     const files = fs.readdirSync(logsDir);
     if (files.length >= 1000) {
       files.sort();
-      const filesToDelete = files.slice(0, files.length - 999);
-      filesToDelete.forEach(file => {
-        try {
-          fs.unlinkSync(`${logsDir}/${file}`);
-        } catch (e) { }
+      files.slice(0, files.length - 999).forEach(f => {
+        try { fs.unlinkSync(`${logsDir}/${f}`); } catch { }
       });
     }
     fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
   } catch { }
 
-  // 1. Emit to local connected clients (e.g., Browser)
-  io.emit("receive-log", logData);
+  // ── Broadcast to FE (internal) ──
+  internalSocket.emit('receive-log', logData);
 
-  // 2. Emit via Socket to Forward Targets (Real-time Link)
-  forwardSockets.forEach(({ url, socket }) => {
+  // ── Forward to upstream servers (external) ──
+  externalSockets.forEach(({ url, socket }) => {
     if (socket.connected) {
-      console.log(`[SOCKET_FORWARD] Pushing log to: ${url}`);
-      socket.emit("forward-log", logData);
+      console.log(`[EXTERNAL] Pushing log to: ${url}`);
+      socket.emit('forward-log', logData);
     }
   });
 
-  if (forward_list.length === 0) return res.status(201).send({ success: true });
+  if (externalUrls.length === 0) return res.status(201).send({ success: true });
 
-  // 3. Keep fallback HTTP forwarding
-  for (const url of forward_list) {
+  // ── Fallback: HTTP forwarding (external) ──
+  for (const url of externalUrls) {
     try {
       await axios.post(`${url}/api/v1/logs`, req.body);
-    } catch (error) {
-      // If socket failed, maybe HTTP still works or vice versa
-      console.error(`Log forwarding (HTTP) error to ${url}:`, error.message);
+    } catch (err) {
+      console.error(`[EXTERNAL] HTTP forward error to ${url}:`, err.message);
     }
   }
+
   return res.status(201).send({ success: true });
 });
 
-app.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
-
-// Socket configuration for INCOMING connections
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+app.post('/create-connection', (req, res) => {
+  const { ip, port: targetPort } = req.body;
+  if (!ip || !targetPort) {
+    return res.status(400).send({ success: false, message: 'Missing ip or port' });
   }
-});
-const os = require('os');
-app.get('/server-information', (req, res) => {
-  const interfaces = os.networkInterfaces();
-  const addresses = [];
-  for (const name in interfaces) {
-    for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        addresses.push(iface.address);
-      }
-    }
-  }
-  // Bổ sung lấy từ json ở đây
-  const sendDic = [
-    { ip: process.env.FORWARD_IP, port: process.env.FORWARD_PORT, mode: 'send', status: "connecting" },
-  ]
-  console.log(sendDic);
-  const receiveDic = [
-    // { ip: '123.456.1.123', port: process.env. }
-  ]
 
-  res.status(200).send({
-    ip: addresses[0] || '127.0.0.1',
-    port: port,
-    all_ips: addresses,
-    sendDic: sendDic,
-    receiveDic: receiveDic
+  const url = `http://${ip}:${targetPort}`;
+  console.log(url)
+  // Return early if already connected
+  const existing = externalSockets.find(s => s.url === url);
+  if (existing) {
+    console.log("existing")
+    return res.status(200).send({
+      success: true,
+      message: `Already connected to ${url}`,
+      connected: existing.socket.connected,
+    });
+  }
+
+  // Create new outbound external socket connection
+  const newExternalSocket = ioClient(url, {
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 2000,
   });
-});
-io.on('connection', (socket) => {
-  console.log('Một user/server đã kết nối:', socket.id);
+  console.log("newExternalSocket")
+  newExternalSocket.on('connect', () => notifyExternalStatus(url, 'send', 'connected'));
+  newExternalSocket.on('connect_error', () => notifyExternalStatus(url, 'send', 'error_disconnected'));
+  newExternalSocket.on('disconnect', () => notifyExternalStatus(url, 'send', 'disconnected'));
+  newExternalSocket.on('forward-log', () => notifyExternalStatus(url, 'send', 'log'));
 
-  // Handle incoming forwarded logs from other servers
+  externalSockets.push({ url, socket: newExternalSocket });
+  console.log(`[EXTERNAL] Creating new connection to: ${url}`);
+  return res.status(200).send({ success: true, message: `Connecting to ${url}...` });
+});
+
+// ─── Internal Socket (FE ↔ BE) ──────────────────────────────────────────────
+const httpServer = createServer(app);
+const internalSocket = new Server(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+});
+
+internalSocket.on('connection', (socket) => {
+  console.log('[INTERNAL] FE client connected:', socket.id);
+
   socket.on('forward-log', (data) => {
-    console.log('[SOCKET_INCOMING] Received forwarded log from another server');
-    io.emit('receive-log', data); // Broadcast it to our local connected UI
+    console.log('[INTERNAL] Received forwarded log — broadcasting to FE');
+    internalSocket.emit('receive-log', data);
   });
 
   socket.on('message', (data) => {
-    console.log('Nhận tin nhắn:', data);
-    io.emit('message', data);
+    console.log('[INTERNAL] Message received:', data);
+    internalSocket.emit('message', data);
   });
 
   socket.on('disconnect', () => {
-    console.log('User/server đã ngắt kết nối');
+    console.log('[INTERNAL] FE client disconnected:', socket.id);
   });
 });
 
-// START SERVE
+// ─── External Socket Notification Helper (server-to-server events → FE) ──────
+const notifyExternalStatus = (url, type, status, data = null) => {
+  const payload = { url, type, status };
+  console.log('[EXTERNAL] status:', status);
+  switch (status) {
+    case 'connected': internalSocket.emit('external-connect', payload); break;
+    case 'error_disconnected':
+    case 'disconnected': internalSocket.emit('external-disconnect', payload); break;
+    case 'log': internalSocket.emit('receive-log', { ...payload, data }); break;
+    default: break;
+  }
+};
+
+// ─── External Socket Clients (server-to-server, startup) ────────────────────
+const externalUrls = [getForwardURL()].filter(Boolean);
+const externalSockets = [];
+
+externalUrls.forEach(url => {
+  console.log(`[EXTERNAL] Creating persistent link to: ${url}`);
+  const externalSocket = ioClient(url, {
+    reconnection: true,
+    reconnectionAttempts: Infinity,
+    reconnectionDelay: 2000,
+  });
+
+  externalSocket.on('connect', () => notifyExternalStatus(url, 'send', 'connected'));
+  externalSocket.on('connect_error', () => notifyExternalStatus(url, 'send', 'error_disconnected'));
+  externalSocket.on('disconnect', () => notifyExternalStatus(url, 'send', 'disconnected'));
+
+  externalSockets.push({ url, socket: externalSocket });
+});
+
+
+// ─── Start Server ─────────────────────────────────────────────────────────────
 httpServer.listen(port, '0.0.0.0', () => {
-  console.log(`Server & Socket running at http://0.0.0.0:${port}`);
+  console.log(`[SERVER] Running at http://0.0.0.0:${port}`);
 });
