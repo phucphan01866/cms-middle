@@ -32,8 +32,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// ─── Declared Routes (skip auto-forward) ─────────────────────────────────────
-const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck'];
+// Sửa mảng này:
+const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/create-connection'];
 
 // Auto-forward undeclared POST requests to CMS backend
 app.use(async (req, res, next) => {
@@ -69,7 +69,7 @@ app.get('/server-information', (req, res) => {
     ip: addresses[0] || '127.0.0.1',
     port,
     all_ips: addresses,
-    sendDic,
+    sendDic: [],
     receiveDic: [],
   });
 });
@@ -101,16 +101,16 @@ app.post('/api/v1/logs', async (req, res) => {
     body: req.body,
   };
 
-  try {
-    const files = fs.readdirSync(logsDir);
-    if (files.length >= 1000) {
-      files.sort();
-      files.slice(0, files.length - 999).forEach(f => {
-        try { fs.unlinkSync(`${logsDir}/${f}`); } catch { }
-      });
-    }
-    fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
-  } catch { }
+  // try {
+  //   const files = fs.readdirSync(logsDir);
+  //   if (files.length >= 1000) {
+  //     files.sort();
+  //     files.slice(0, files.length - 999).forEach(f => {
+  //       try { fs.unlinkSync(`${logsDir}/${f}`); } catch { }
+  //     });
+  //   }
+  //   fs.writeFileSync(fileName, JSON.stringify(logData, null, 2));
+  // } catch { }
 
   // ── Broadcast to FE (internal) ──
   internalSocket.emit('receive-log', logData);
@@ -138,13 +138,14 @@ app.post('/api/v1/logs', async (req, res) => {
 });
 
 app.post('/create-connection', (req, res) => {
-  const { ip, port: targetPort } = req.body;
-  if (!ip || !targetPort) {
+  const { ip, port } = req.body;
+
+  const url = `http://${ip}:${port}`
+
+  if (!ip || !port) {
     return res.status(400).send({ success: false, message: 'Missing ip or port' });
   }
 
-  const url = `http://${ip}:${targetPort}`;
-  console.log(url)
   // Return early if already connected
   const existing = externalSockets.find(s => s.url === url);
   if (existing) {
@@ -162,10 +163,16 @@ app.post('/create-connection', (req, res) => {
     reconnectionAttempts: Infinity,
     reconnectionDelay: 2000,
   });
-  console.log("newExternalSocket")
-  newExternalSocket.on('connect', () => notifyExternalStatus(url, 'send', 'connected'));
-  newExternalSocket.on('connect_error', () => notifyExternalStatus(url, 'send', 'error_disconnected'));
-  newExternalSocket.on('disconnect', () => notifyExternalStatus(url, 'send', 'disconnected'));
+  console.log("newExternalSocket created")
+  newExternalSocket.on('connect', () => {
+    notifyExternalStatus(url, 'send', 'external-connect')
+  });
+  newExternalSocket.on('connect_error', () => {
+    notifyExternalStatus(url, 'send', 'external-connect-error')
+  });
+  newExternalSocket.on('disconnect', () => {
+    notifyExternalStatus(url, 'send', 'external-disconnected')
+  });
   newExternalSocket.on('forward-log', () => notifyExternalStatus(url, 'send', 'log'));
 
   externalSockets.push({ url, socket: newExternalSocket });
@@ -176,7 +183,7 @@ app.post('/create-connection', (req, res) => {
 // ─── Internal Socket (FE ↔ BE) ──────────────────────────────────────────────
 const httpServer = createServer(app);
 const internalSocket = new Server(httpServer, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: '*' },
 });
 
 internalSocket.on('connection', (socket) => {
@@ -202,10 +209,14 @@ const notifyExternalStatus = (url, type, status, data = null) => {
   const payload = { url, type, status };
   console.log('[EXTERNAL] status:', status);
   switch (status) {
-    case 'connected': internalSocket.emit('external-connect', payload); break;
-    case 'error_disconnected':
-    case 'disconnected': internalSocket.emit('external-disconnect', payload); break;
+    case 'connected': internalSocket.emit('connected', payload); break;
+    case 'error_disconnected': internalSocket.emit('error_disconnected', payload); break;
+    case 'disconnected': internalSocket.emit('disconnected', payload); break;
     case 'log': internalSocket.emit('receive-log', { ...payload, data }); break;
+    case 'external-connect': internalSocket.emit('external-connect', payload); break;
+    case 'external-err-connect': internalSocket.emit('external-err-connect', payload); break;
+    case 'external-disconnect': internalSocket.emit('external-disconnect', payload); break;
+    case 'receive-log': internalSocket.emit('receive-log', { ...payload, data }); break;
     default: break;
   }
 };
@@ -214,20 +225,20 @@ const notifyExternalStatus = (url, type, status, data = null) => {
 const externalUrls = [getForwardURL()].filter(Boolean);
 const externalSockets = [];
 
-externalUrls.forEach(url => {
-  console.log(`[EXTERNAL] Creating persistent link to: ${url}`);
-  const externalSocket = ioClient(url, {
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 2000,
-  });
+// externalUrls.forEach(url => {
+//   console.log(`[EXTERNAL] Creating persistent link to: ${url}`);
+//   const externalSocket = ioClient(url, {
+//     reconnection: true,
+//     reconnectionAttempts: Infinity,
+//     reconnectionDelay: 2000,
+//   });
 
-  externalSocket.on('connect', () => notifyExternalStatus(url, 'send', 'connected'));
-  externalSocket.on('connect_error', () => notifyExternalStatus(url, 'send', 'error_disconnected'));
-  externalSocket.on('disconnect', () => notifyExternalStatus(url, 'send', 'disconnected'));
+//   externalSocket.on('connect', () => notifyExternalStatus(url, 'send', 'external-connect'));
+//   externalSocket.on('connect_error', () => notifyExternalStatus(url, 'send', 'external-err-connect'));
+//   externalSocket.on('disconnect', () => notifyExternalStatus(url, 'send', 'external-disconnect'));
 
-  externalSockets.push({ url, socket: externalSocket });
-});
+//   externalSockets.push({ url, socket: externalSocket });
+// });
 
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
