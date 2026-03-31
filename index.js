@@ -55,12 +55,12 @@ app.use(express.json({ limit: '50mb' }));
 
 // Request Logger
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  // console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
   next();
 });
 
 // Auto-forward logic cho các route không khai báo trong file này
-const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/create-connection', '/server-information'];
+const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/api/v1/create-connection', '/server-information'];
 app.use(async (req, res, next) => {
   if (req.method !== 'POST' || declaredRoutes.includes(req.path)) return next();
   const CMS_BE_URL = getCMSBackendURL();
@@ -127,7 +127,9 @@ app.post('/api/v1/logs', async (req, res) => {
   return res.status(201).send({ success: true });
 });
 
-app.post('/create-connection', (req, res) => {
+
+// Khởi tạo kết nối làm "Khách" tới một server cấp trên khác
+app.post('/api/v1/create-connection', (req, res) => {
   const { ip, port, mode } = req.body;
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
 
@@ -137,19 +139,20 @@ app.post('/create-connection', (req, res) => {
     return res.status(200).send({ success: true, message: 'Already configured', connected: existing.socket.connected });
   }
 
-  // Khởi tạo kết nối làm "Khách" tới một server cấp trên khác
   const newServerSocket = ioClient(url, {
     reconnection: true,
     reconnectionAttempts: Infinity,
     reconnectionDelay: 2000,
   });
 
-  newServerSocket.on('connect', () => notifyStatusToClients(url, mode, 'connected'));
-  newServerSocket.on('connect_error', () => notifyStatusToClients(url, mode, 'error'));
-  newServerSocket.on('disconnect', () => notifyStatusToClients(url, mode, 'disconnected'));
-  newServerSocket.on('receive-log', (data) => notifyStatusToClients(url, mode, 'receive-log', data));
+  const connMode = mode || 'send';
 
-  serverSockets.push({ url, socket: newServerSocket, mode });
+  newServerSocket.on('connect', () => notifyStatusToClients(url, connMode, 'connected'));
+  newServerSocket.on('connect_error', () => notifyStatusToClients(url, connMode, 'error'));
+  newServerSocket.on('disconnect', () => notifyStatusToClients(url, connMode, 'disconnected'));
+  newServerSocket.on('receive-log', (data) => notifyStatusToClients(url, connMode, 'receive-log', data));
+
+  serverSockets.push({ url, socket: newServerSocket, mode: connMode });
   return res.status(200).send({ success: true, message: `Connecting to server ${url}...` });
 });
 
@@ -159,11 +162,12 @@ clientSockets.on('connection', (socket) => {
 
   socket.on('forward-log', (data) => {
     // Nhận log từ một máy khác (máy đó coi mình là server) -> Phát lại cho FE của mình
-    console.log('[RECEIVE] Log received from connected node — broadcasting to clients');
+    console.log(`[RECEIVE] Log received from node ${socket.id} — broadcasting to clients`);
     clientSockets.emit('receive-log', data);
   });
 
   socket.on('message', (data) => {
+    console.log(`[MESSAGE] Received message from client ${socket.id} — broadcasting`);
     clientSockets.emit('message', data);
   });
 
