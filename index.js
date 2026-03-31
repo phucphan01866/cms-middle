@@ -153,7 +153,7 @@ app.post('/api/v1/create-connection', (req, res) => {
   newServerSocket.on('receive-log', (data) => notifyStatusToClients(url, connMode, 'receive-log', data));
 
   serverSockets.push({ url, socket: newServerSocket, mode: connMode });
-  return res.status(200).send({ success: true, message: `Connecting to server ${url}...` });
+  return res.status(200).send({ success: true, message: `Connecting to server ${url}...`, ip, port });
 });
 
 // ─── SECTION 6: SOCKET SERVER EVENTS (Đón khách) ─────────────────────────────
