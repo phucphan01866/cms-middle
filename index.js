@@ -15,6 +15,76 @@ const app = express();
 const httpServer = createServer(app);
 const port = process.env.THIS_PORT || 5050;
 
+// log APIs example
+// 1.	 POST /api/v1/logs
+// Method:         POST
+// URL:            /api/v1/logs
+// IP (nguồn):     ::ffff:127.0.0.1
+
+// Headers:
+//   host                  "192.168.1.148"                          // Địa chỉ host/server BE
+//   x-forwarded-scheme    "http"                                   // Scheme gốc (http/https)
+//   x-forwarded-proto     "http"                                   // Protocol gốc
+//   x-forwarded-for       "172.18.0.1"                             // IP gốc của client (thường qua proxy)
+//   x-real-ip             "172.18.0.1"                             // IP thực của client (từ proxy/reverse proxy)
+//   content-length        124194                                   // Kích thước body tính bằng byte
+//   content-type          "application/json"                       // Định dạng dữ liệu gửi lên
+//   accept                "*.*"                                    // Client chấp nhận mọi loại response
+//   authorization         "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI2OTU3OWQwMGFjMDM5Yzg3NWFjOGEyOGQiLCJpYXQiOjE3NzM5Njk5MjYsImV4cCI6MTgwNTUyNzUyNn0.DMIwdtRkGwXKge-ZSLlspbNUJjqpK97WYgmxBUTSB6Q"
+//                                                                  // JWT token xác thực (Bearer)
+
+// Body (application/json):
+//   server                object                                   // Thông tin server
+//     serial              "Lenovo"                                 // Số serial phần cứng server
+//     server_id           "Lenovo"                                 // ID định danh server
+//   time                  1773974391                               // UNIX timestamp (giây) - thời điểm sự kiện xảy ra
+//   device_index          1                                        // Chỉ số thiết bị (thứ tự camera/channel)
+//   device_ip             "192.168.1.202:2000"                     // IP + port của camera/thiết bị
+//   device_type           "camera"                                 // Loại thiết bị
+//   device_name           "Channel 2"                              // Tên kênh / tên camera trên VMS
+//   log_type              "motion"                                 // Loại log/sự kiện
+//   description           "A Motion has been detected."            // Mô tả chi tiết sự kiện (tùy theo loại log_time)
+//   snapshot							 // Base64 Image
+
+// Output Json có dạng
+// {"success":true}}						 // Để giữ trạng thái handshake
+
+// 2.	 Request Type: POST /api/v1/logs
+// Method:         POST
+// URL:            /api/v1/logs
+// IP (nguồn):     ::ffff:127.0.0.1
+
+// Headers:
+//   host                  "192.168.1.148"                          // Địa chỉ host/server BE
+//   x-forwarded-scheme    "http"                                   // Scheme gốc (http/https) từ client
+//   x-forwarded-proto     "http"                                   // Protocol gốc
+//   x-forwarded-for       "172.18.0.1"                             // IP gốc của client (qua proxy/load balancer)
+//   x-real-ip             "172.18.0.1"                             // IP thực tế của client (từ reverse proxy)
+//   content-length        187945                                   // Kích thước body (byte)
+//   content-type          "application/json"                       // Định dạng dữ liệu body
+//   accept                "*.*"                                    // Client chấp nhận mọi loại response
+//   authorization         "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOiI2OTU3OWQwMGFjMDM5Yzg3NWFjOGEyOGQiLCJpYXQiOjE3NzM5Njk5MjYsImV4cCI6MTgwNTUyNzUyNn0.DMIwdtRkGwXKge-ZSLlspbNUJjqpK97WYgmxBUTSB6Q"
+//                                                                  // JWT Bearer token
+
+// Body (application/json):
+//   server                object                                   // Thông tin server ghi log
+//     serial              "Lenovo"                                 // Số serial phần cứng của server
+//     server_id           "Lenovo"                                 // ID định danh server
+//   time                  1773974388                               // UNIX timestamp (giây) - thời điểm sự kiện
+//   device_index          1                                        // Chỉ số thiết bị (thứ tự camera/channel)
+//   device_ip             "192.168.1.202:2000"                     // Địa chỉ IP + port của thiết bị camera
+//   device_type           "camera"                                 // Loại thiết bị
+//   device_name           "Channel 2"                              // Tên kênh / tên camera trên VMS
+//   log_type              "crosswire.counting.vehicle.result"      // Loại log
+//   description           "785"                                    // Kết quả (ở đây là số lượng xe/phương tiện đã được ghi nhận)
+
+// Query parameters:     {}                                         // Không có tham số query string
+
+// Output Json có dạng
+// {"success":true}}						 // Để giữ trạng thái handshake
+
+
+
 // ─── SECTION 2: SOCKET STATE MANAGEMENT ──────────────────────────────────────
 /**
  * clientSockets: INSTANCE của Socket.io Server.
@@ -112,6 +182,10 @@ app.post('/api/v1/logs', async (req, res) => {
     ip: req.ip,
     body: req.body,
   };
+  
+  // GHI CHÚ: Dữ liệu logData bao gồm `body` giữ nguyên vẹn cấu trúc gửi lên từ các Node/Camera.
+  // Các field như `server`, `device_ip`, v.v... được gửi nguyên trạng.
+  // Tại FE, hook useSocketManager dùng dữ liệu này ánh xạ mapping trực tiếp với LogData type (simplified). Không conflict xảy ra.
 
   // 1. Phát dữ liệu cho các Client của mình (Frontend hoặc Node cấp dưới)
   clientSockets.emit('receive-log', logData);
