@@ -208,6 +208,7 @@ app.post('/api/v1/logs', async (req, res) => {
 // Khởi tạo kết nối làm "Khách" tới một server cấp trên khác
 app.post('/api/v1/create-connection', (req, res) => {
   const { ip, port, mode } = req.body;
+  console.log("creating connection to ", ip, port, mode)
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
 
   const url = `http://${ip}:${port}`;
