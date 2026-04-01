@@ -174,6 +174,9 @@ app.post('/api/v1/login', async (req, res) => {
 });
 
 app.post('/api/v1/logs', async (req, res) => {
+  if (req.body && !req.body.sender_ip) {
+    req.body.sender_ip = (req.socket?.remoteAddress || req.ip || '').replace('::ffff:', '');
+  }
   const logData = {
     timestamp: new Date().toISOString(),
     method: req.method,
@@ -182,7 +185,7 @@ app.post('/api/v1/logs', async (req, res) => {
     ip: req.ip,
     body: req.body,
   };
-  
+  // console.log('logData', req);
   // GHI CHÚ: Dữ liệu logData bao gồm `body` giữ nguyên vẹn cấu trúc gửi lên từ các Node/Camera.
   // Các field như `server`, `device_ip`, v.v... được gửi nguyên trạng.
   // Tại FE, hook useSocketManager dùng dữ liệu này ánh xạ mapping trực tiếp với LogData type (simplified). Không conflict xảy ra.
