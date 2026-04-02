@@ -276,16 +276,16 @@ app.post('/api/v1/create-connection', (req, res) => {
   });
 
   serverSockets.push({ url, socket: newServerSocket, mode: connMode });
-  return res.status(200).send({ success: true, message: `Connecting to server ${url}...`, ip, port });
+  return res.status(200).send({ success: true, message: `${getCMSBackendURL()} telling ${url} to become a client`, ip, port });
 });
 
 // ─── SECTION 6: SOCKET SERVER EVENTS (Đón khách) ─────────────────────────────
 clientSockets.on('connection', (socket) => {
   console.log('[NODE_CONNECTED] New client/node connected. ID:', socket.id);
-  
+
   // Khởi tạo sentCount cho socket này
   socket.data = { sentCount: 0 };
-  
+
   // Sync client list to all connected frontends
   syncClientsToFrontend();
 
