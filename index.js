@@ -229,16 +229,27 @@ app.post('/api/v1/logs', async (req, res) => {
   });
 
   // 1. Phát dữ liệu cho các Client của mình (Frontend hoặc Node cấp dưới)
+  const serverId = req.body?.server?.server_id || 'UNKNOWN';
+  const sourceIp = (req.ip || '').replace('::ffff:', '');
+  console.log(`[DISPATCH] Log from ${serverId} (${sourceIp}) → broadcasting to ${sockets.length} client(s)`);
+  sockets.forEach(s => {
+    const clientIp = (s.handshake.address || '').replace('::ffff:', '');
+    console.log(`  ├─ [CLIENT] ${clientIp} (socket: ${s.id}) | sentCount: ${s.data.sentCount}`);
+  });
   clientSockets.emit('receive-log', logData);
   clientSockets.emit('log-dispatched', { timestamp: logData.timestamp });
 
   // 2. Chuyển tiếp (Forward) log lên các Server cấp trên (Upstream)
-  // GHI CHÚ: Option 2 hiện tại ưu tiên hiển thị log gửi cho các "Clients" kết nối trực tiếp.
-  // Logic Upstream vẫn giữ nguyên để phục vụ các mục đích relay khác.
+  const sendUpstreams = serverSockets.filter(s => s.socket.connected && s.mode === 'send');
+  if (sendUpstreams.length > 0) {
+    console.log(`[FORWARD] Forwarding log to ${sendUpstreams.length} upstream server(s):`);
+  }
   serverSockets.forEach(({ url, socket, mode }) => {
     if (socket.connected && mode === 'send') {
-      console.log(`[FORWARD] Sending log to server: ${url}`);
+      console.log(`  ├─ [UPSTREAM] ${url} (mode: ${mode}, connected: ${socket.connected})`);
       socket.emit('forward-log', logData);
+    } else if (mode === 'send') {
+      console.log(`  ├─ [UPSTREAM_SKIP] ${url} (mode: ${mode}, connected: ${socket.connected}) — not connected`);
     }
   });
 
