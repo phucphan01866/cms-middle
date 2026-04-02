@@ -139,7 +139,8 @@ const getActiveClients = async () => {
       ip: (s.handshake.address || '').replace('::ffff:', ''),
       port: clientPort,
       status: 'connected',
-      mode: 'send'
+      mode: 'send',
+      sentCount: s.data.sentCount || 0
     };
   });
 };
@@ -221,6 +222,12 @@ app.post('/api/v1/logs', async (req, res) => {
   // Các field như `server`, `device_ip`, v.v... được gửi nguyên trạng.
   // Tại FE, hook useSocketManager dùng dữ liệu này ánh xạ mapping trực tiếp với LogData type (simplified). Không conflict xảy ra.
 
+  // Lấy các sockets hiện tại và cập nhật biến đếm sentCount
+  const sockets = await clientSockets.fetchSockets();
+  sockets.forEach(s => {
+    s.data.sentCount = (s.data.sentCount || 0) + 1;
+  });
+
   // 1. Phát dữ liệu cho các Client của mình (Frontend hoặc Node cấp dưới)
   clientSockets.emit('receive-log', logData);
   clientSockets.emit('log-dispatched', { timestamp: logData.timestamp });
@@ -275,6 +282,9 @@ app.post('/api/v1/create-connection', (req, res) => {
 // ─── SECTION 6: SOCKET SERVER EVENTS (Đón khách) ─────────────────────────────
 clientSockets.on('connection', (socket) => {
   console.log('[NODE_CONNECTED] New client/node connected. ID:', socket.id);
+  
+  // Khởi tạo sentCount cho socket này
+  socket.data = { sentCount: 0 };
   
   // Sync client list to all connected frontends
   syncClientsToFrontend();
