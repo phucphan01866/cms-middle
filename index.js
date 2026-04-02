@@ -15,6 +15,9 @@ const app = express();
 const httpServer = createServer(app);
 const port = process.env.THIS_PORT || 5050;
 
+//clientSocket - các kết nối với FE
+//serverSocket - các kết nối với các server truyền data vào
+
 // log APIs example
 // 1.	 POST /api/v1/logs
 // Method:         POST
@@ -107,15 +110,43 @@ const getForwardURL = () => getURL(process.env.FORWARD_IP, process.env.FORWARD_P
 
 const notifyStatusToClients = (url, mode, status, data = null) => {
   const payload = { url, type: mode, status };
-
+  // if (mode = 'receive') {
+  //   console.log("received")
+  // }
   // Ánh xạ status sang event name mà FE đang lắng nghe
   let eventName = status;
   if (status === 'connected') eventName = 'external-connect';
   if (status === 'error') eventName = 'external-err-connect';
   if (status === 'disconnected') eventName = 'external-disconnected';
   if (status === 'receive-log') eventName = 'receive-log';
+  if (status === 'log-sent') eventName = 'log-sent';
 
+  if (status === 'receive-log') {
+    // console.log("received to fe", data)
+  }
   clientSockets.emit(eventName, { ...payload, data });
+};
+
+const getActiveClients = async () => {
+  const sockets = await clientSockets.fetchSockets();
+  return sockets.map(s => {
+    let clientPort = port;
+    if (s.handshake?.headers?.host) {
+      clientPort = s.handshake.headers.host.split(':')[1] || port;
+    }
+    return {
+      socketId: s.id,
+      ip: (s.handshake.address || '').replace('::ffff:', ''),
+      port: clientPort,
+      status: 'connected',
+      mode: 'send'
+    };
+  });
+};
+
+const syncClientsToFrontend = async () => {
+  const clients = await getActiveClients();
+  clientSockets.emit('update-clients', clients);
 };
 
 // ─── SECTION 4: MIDDLEWARE ───────────────────────────────────────────────────
@@ -192,10 +223,13 @@ app.post('/api/v1/logs', async (req, res) => {
 
   // 1. Phát dữ liệu cho các Client của mình (Frontend hoặc Node cấp dưới)
   clientSockets.emit('receive-log', logData);
+  clientSockets.emit('log-dispatched', { timestamp: logData.timestamp });
 
   // 2. Chuyển tiếp (Forward) log lên các Server cấp trên (Upstream)
-  serverSockets.forEach(({ url, socket }) => {
-    if (socket.connected) {
+  // GHI CHÚ: Option 2 hiện tại ưu tiên hiển thị log gửi cho các "Clients" kết nối trực tiếp.
+  // Logic Upstream vẫn giữ nguyên để phục vụ các mục đích relay khác.
+  serverSockets.forEach(({ url, socket, mode }) => {
+    if (socket.connected && mode === 'send') {
       console.log(`[FORWARD] Sending log to server: ${url}`);
       socket.emit('forward-log', logData);
     }
@@ -207,8 +241,9 @@ app.post('/api/v1/logs', async (req, res) => {
 
 // Khởi tạo kết nối làm "Khách" tới một server cấp trên khác
 app.post('/api/v1/create-connection', (req, res) => {
+
   const { ip, port, mode } = req.body;
-  console.log("creating connection to ", ip, port, mode)
+  console.log("create-connection to ", ip, port, mode)
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
 
   const url = `http://${ip}:${port}`;
@@ -228,7 +263,10 @@ app.post('/api/v1/create-connection', (req, res) => {
   newServerSocket.on('connect', () => notifyStatusToClients(url, connMode, 'connected'));
   newServerSocket.on('connect_error', () => notifyStatusToClients(url, connMode, 'error'));
   newServerSocket.on('disconnect', () => notifyStatusToClients(url, connMode, 'disconnected'));
-  newServerSocket.on('receive-log', (data) => notifyStatusToClients(url, connMode, 'receive-log', data));
+  newServerSocket.on('receive-log', (data) => {
+    // console.log("received", data)
+    notifyStatusToClients(url, connMode, 'receive-log', data)
+  });
 
   serverSockets.push({ url, socket: newServerSocket, mode: connMode });
   return res.status(200).send({ success: true, message: `Connecting to server ${url}...`, ip, port });
@@ -237,11 +275,15 @@ app.post('/api/v1/create-connection', (req, res) => {
 // ─── SECTION 6: SOCKET SERVER EVENTS (Đón khách) ─────────────────────────────
 clientSockets.on('connection', (socket) => {
   console.log('[NODE_CONNECTED] New client/node connected. ID:', socket.id);
+  
+  // Sync client list to all connected frontends
+  syncClientsToFrontend();
 
   socket.on('forward-log', (data) => {
     // Nhận log từ một máy khác (máy đó coi mình là server) -> Phát lại cho FE của mình
     console.log(`[RECEIVE] Log received from node ${socket.id} — broadcasting to clients`);
     clientSockets.emit('receive-log', data);
+    clientSockets.emit('log-dispatched', { timestamp: data.timestamp });
   });
 
   socket.on('message', (data) => {
@@ -251,6 +293,7 @@ clientSockets.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log('[NODE_DISCONNECTED] ID:', socket.id);
+    syncClientsToFrontend();
   });
 });
 
