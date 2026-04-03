@@ -120,11 +120,17 @@ const notifyStatusToClients = (url, mode, status, data = null) => {
   if (status === 'disconnected') eventName = 'external-disconnected';
   if (status === 'receive-log') eventName = 'receive-log';
   if (status === 'log-sent') eventName = 'log-sent';
-
-  if (status === 'receive-log') {
-    // console.log("received to fe", data)
+  if (status === 'connected') {
+    console.log("received to fe", payload)
   }
-  clientSockets.emit(eventName, { ...payload, data });
+  switch (eventName) {
+    case 'receive-log':
+      clientSockets.emit('receive-log', data);
+      break;
+    default:
+      clientSockets.emit(eventName, { ...payload, data });
+
+  }
 };
 
 const getActiveClients = async () => {
@@ -261,7 +267,6 @@ app.post('/api/v1/logs', async (req, res) => {
 app.post('/api/v1/create-connection', (req, res) => {
 
   const { ip, port, mode } = req.body;
-  console.log("create-connection to ", ip, port, mode)
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
 
   const url = `http://${ip}:${port}`;
@@ -285,8 +290,10 @@ app.post('/api/v1/create-connection', (req, res) => {
     // console.log("received", data)
     notifyStatusToClients(url, connMode, 'receive-log', data)
   });
+  console.log("create-connection to ", url, mode)
 
   serverSockets.push({ url, socket: newServerSocket, mode: connMode });
+  console.log("serverSockets", serverSockets)
   return res.status(200).send({ success: true, message: `${getCMSBackendURL()} telling ${url} to become a client`, ip, port });
 });
 
