@@ -3,7 +3,7 @@ const express = require('express');
 const { io: ioClient } = require('socket.io-client');
 const { serverSockets } = require('../socketState');
 const { getCMSBackendURL } = require('../config');
-const { notifyStatusToClients, getActiveClients, removeServerSocket } = require('../helpers/notify');
+const { notifyStatusToClients, getActiveClients, removeServerSocket, disconnectClientSocket } = require('../helpers/notify');
 
 const router = express.Router();
 
@@ -12,6 +12,15 @@ router.post('/remove-server', (req, res) => {
   const { url } = req.body;
   removeServerSocket(url);
   res.send({ success: true });
+});
+
+// Ngắt kết nối một client đang kết nối vào server này (theo socketId)
+router.post('/api/v1/disconnect-client', async (req, res) => {
+  const { socketId } = req.body;
+  if (!socketId) return res.status(400).send({ success: false, message: 'Missing socketId' });
+
+  const result = await disconnectClientSocket(socketId);
+  return res.status(result.success ? 200 : 404).send(result);
 });
 
 // Khởi tạo kết nối làm "Khách" tới một server cấp trên khác
@@ -36,7 +45,14 @@ router.post('/api/v1/create-connection', (req, res) => {
 
   newServerSocket.on('connect', () => notifyStatusToClients(url, connMode, 'connected'));
   newServerSocket.on('connect_error', () => notifyStatusToClients(url, connMode, 'error'));
-  newServerSocket.on('disconnect', () => notifyStatusToClients(url, connMode, 'disconnected'));
+  newServerSocket.on('disconnect', () => {
+    console.log('removing', url);
+    const idx = serverSockets.findIndex(s => s.url === url);
+    if (idx !== -1) {
+      serverSockets.splice(idx, 1);
+    }
+    notifyStatusToClients(url, connMode, 'disconnected');
+  });
   newServerSocket.on('receive-log', (data) => {
     notifyStatusToClients(url, connMode, 'receive-log', data);
   });

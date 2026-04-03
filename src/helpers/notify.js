@@ -77,9 +77,26 @@ const removeServerSocket = (url) => {
   return { success: true, message: `Removed ${url}` };
 };
 
+/**
+ * Ngắt kết nối một client đang kết nối vào server này (theo socketId).
+ */
+const disconnectClientSocket = async (socketId) => {
+  const clientSockets = getClientSockets();
+  const sockets = await clientSockets.fetchSockets();
+  const target = sockets.find(s => s.id === socketId);
+  if (!target) {
+    console.log(`[DISCONNECT_CLIENT] Socket not found: ${socketId}`);
+    return { success: false, message: 'Client socket not found' };
+  }
+  target.disconnect(true);
+  console.log(`[DISCONNECT_CLIENT] Kicked client: ${socketId}`);
+  return { success: true, message: `Disconnected ${socketId}` };
+};
+
 module.exports = {
   notifyStatusToClients,
   getActiveClients,
   syncClientsToFrontend,
   removeServerSocket,
+  disconnectClientSocket,
 };

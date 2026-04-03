@@ -27,7 +27,7 @@ const setupSocketEvents = () => {
     });
 
     socket.on('disconnect', () => {
-      console.log('[NODE_DISCONNECTED] ID:', socket.id);
+      console.log("socket: ", clientSockets)
       syncClientsToFrontend();
     });
   });
