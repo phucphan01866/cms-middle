@@ -199,7 +199,7 @@ app.use((req, res, next) => {
 });
 
 // Auto-forward logic cho các route không khai báo trong file này
-const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/api/v1/create-connection', '/api/v1/remove-connection', '/server-information'];
+const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/api/v1/create-connection', '/api/v1/remove-connection', '/api/v1/connections', '/server-information'];
 app.use(async (req, res, next) => {
   if (req.method !== 'POST' || declaredRoutes.includes(req.path)) return next();
   const CMS_BE_URL = getCMSBackendURL();
@@ -276,6 +276,18 @@ app.post('/api/v1/logs', async (req, res) => {
   clientSockets.emit('receive-log', logData);
   clientSockets.emit('log-dispatched', { timestamp: logData.timestamp });
 
+  // Track receivedCount và server_id trên serverSocket entry tương ứng
+  const senderIp = (req.ip || '').replace('::ffff:', '');
+  serverSockets.forEach(entry => {
+    const entryIp = new URL(entry.url).hostname;
+    if (entryIp === senderIp) {
+      entry.receivedCount = (entry.receivedCount || 0) + 1;
+      if (!entry.server_id && req.body?.server?.server_id) {
+        entry.server_id = req.body.server.server_id + '-' + (req.body.server.serial || '');
+      }
+    }
+  });
+
   // 2. Chuyển tiếp (Forward) log lên các Server cấp trên (Upstream)
   const sendUpstreams = serverSockets.filter(s => s.socket.connected && s.mode === 'send');
   if (sendUpstreams.length > 0) {
@@ -336,6 +348,26 @@ app.post('/api/v1/remove-connection', (req, res) => {
   const result = removeServerSocket(url);
 
   return res.status(result.success ? 200 : 404).send(result);
+});
+
+// ─── SECTION 5.5: GET CONNECTIONS API ─────────────────────────────────────────
+app.get('/api/v1/connections', async (req, res) => {
+  // sendList = các client đang kết nối vào server này (FE, nodes cấp dưới)
+  const sendList = (await getActiveClients()).map(({ mode, ...rest }) => rest);
+
+  // receiveList = các server mà máy này kết nối tới (upstream)
+  const receiveList = serverSockets.map(s => {
+    const parsed = new URL(s.url);
+    return {
+      ip: parsed.hostname,
+      port: parsed.port,
+      status: s.socket.connected ? 'connected' : 'disconnected',
+      server_id: s.server_id || 'PENDING',
+      receivedCount: s.receivedCount || 0,
+    };
+  });
+
+  res.json({ sendList, receiveList });
 });
 
 // ─── SECTION 6: SOCKET SERVER EVENTS (Đón khách) ─────────────────────────────
