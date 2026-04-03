@@ -1,0 +1,27 @@
+// ─── HEALTH & SERVER INFO ROUTES ──────────────────────────────────────────────
+const express = require('express');
+const os = require('os');
+const { port } = require('../config');
+const { serverSockets } = require('../socketState');
+
+const router = express.Router();
+
+router.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
+
+router.get('/server-information', (req, res) => {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name in interfaces) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) addresses.push(iface.address);
+    }
+  }
+  res.status(200).send({
+    ip: addresses[0] || '127.0.0.1',
+    port,
+    all_ips: addresses,
+    serverSockets: serverSockets.map(s => ({ url: s.url, connected: s.socket.connected }))
+  });
+});
+
+module.exports = router;
