@@ -16,6 +16,10 @@ const notifyStatusToClients = (url, mode, status, data = null) => {
   if (status === 'receive-log') eventName = 'receive-log';
   if (status === 'log-sent') eventName = 'log-sent';
 
+  // if (eventName === "receive-log") {
+  //   clientSockets.emit(eventName, data);
+  // }
+
   clientSockets.emit(eventName, { ...payload, data });
 };
 
