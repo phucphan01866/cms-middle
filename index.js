@@ -156,6 +156,43 @@ const syncClientsToFrontend = async () => {
   clientSockets.emit('update-clients', clients);
 };
 
+/**
+ * removeServerSocket: Ngắt kết nối và xóa một socket client khỏi serverSockets.
+ * @param {string} url - URL của server cần xóa (e.g. "http://192.168.1.100:5050")
+ * @returns {{ success: boolean, message: string }}
+ */
+
+app.post('/remove-server', (req, res) => {
+  const { url } = req.body;
+  removeServerSocket(url);
+  res.send({ success: true });
+})
+
+const removeServerSocket = (url) => {
+  const idx = serverSockets.findIndex(s => s.url === url);
+  if (idx === -1) {
+    console.log(`[REMOVE] Socket not found for URL: ${url}`);
+    return { success: false, message: 'Socket not found' };
+  }
+
+  const entry = serverSockets[idx];
+  const mode = entry.mode;
+
+  // Ngắt kết nối socket client
+  entry.socket.removeAllListeners();
+  entry.socket.disconnect();
+
+  // Xóa khỏi mảng
+  serverSockets.splice(idx, 1);
+
+  console.log(`[REMOVE] Disconnected and removed socket: ${url} (mode: ${mode})`);
+
+  // Thông báo cho FE biết server đã bị xóa
+  notifyStatusToClients(url, mode, 'disconnected');
+
+  return { success: true, message: `Removed ${url}` };
+};
+
 // ─── SECTION 4: MIDDLEWARE ───────────────────────────────────────────────────
 app.use(cors({ origin: true, credentials: true }));
 app.use(cookieParser());
@@ -168,7 +205,7 @@ app.use((req, res, next) => {
 });
 
 // Auto-forward logic cho các route không khai báo trong file này
-const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/api/v1/create-connection', '/server-information'];
+const declaredRoutes = ['/api/v1/login', '/api/v1/logs', '/healthcheck', '/api/v1/create-connection', '/api/v1/remove-connection', '/api/v1/connections', '/server-information'];
 app.use(async (req, res, next) => {
   if (req.method !== 'POST' || declaredRoutes.includes(req.path)) return next();
   const CMS_BE_URL = getCMSBackendURL();
@@ -245,6 +282,18 @@ app.post('/api/v1/logs', async (req, res) => {
   clientSockets.emit('receive-log', logData);
   clientSockets.emit('log-dispatched', { timestamp: logData.timestamp });
 
+  // Track receivedCount và server_id trên serverSocket entry tương ứng
+  const senderIp = (req.ip || '').replace('::ffff:', '');
+  serverSockets.forEach(entry => {
+    const entryIp = new URL(entry.url).hostname;
+    if (entryIp === senderIp) {
+      entry.receivedCount = (entry.receivedCount || 0) + 1;
+      if (!entry.server_id && req.body?.server?.server_id) {
+        entry.server_id = req.body.server.server_id + '-' + (req.body.server.serial || '');
+      }
+    }
+  });
+
   // 2. Chuyển tiếp (Forward) log lên các Server cấp trên (Upstream)
   const sendUpstreams = serverSockets.filter(s => s.socket.connected && s.mode === 'send');
   if (sendUpstreams.length > 0) {
@@ -295,6 +344,37 @@ app.post('/api/v1/create-connection', (req, res) => {
   serverSockets.push({ url, socket: newServerSocket, mode: connMode });
   console.log("serverSockets", serverSockets)
   return res.status(200).send({ success: true, message: `${getCMSBackendURL()} telling ${url} to become a client`, ip, port });
+});
+
+// Xóa kết nối socket client khỏi serverSockets
+app.post('/api/v1/remove-connection', (req, res) => {
+  const { ip, port } = req.body;
+  if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
+
+  const url = `http://${ip}:${port}`;
+  const result = removeServerSocket(url);
+
+  return res.status(result.success ? 200 : 404).send(result);
+});
+
+// ─── SECTION 5.5: GET CONNECTIONS API ─────────────────────────────────────────
+app.get('/api/v1/connections', async (req, res) => {
+  // sendList = các client đang kết nối vào server này (FE, nodes cấp dưới)
+  const sendList = (await getActiveClients()).map(({ mode, ...rest }) => rest);
+
+  // receiveList = các server mà máy này kết nối tới (upstream)
+  const receiveList = serverSockets.map(s => {
+    const parsed = new URL(s.url);
+    return {
+      ip: parsed.hostname,
+      port: parsed.port,
+      status: s.socket.connected ? 'connected' : 'disconnected',
+      server_id: s.server_id || 'PENDING',
+      receivedCount: s.receivedCount || 0,
+    };
+  });
+
+  res.json({ sendList, receiveList });
 });
 
 // ─── SECTION 6: SOCKET SERVER EVENTS (Đón khách) ─────────────────────────────
