@@ -2,7 +2,7 @@
 const express = require('express');
 const os = require('os');
 const { port } = require('../config');
-const { serverSockets } = require('../socketState');
+const { connections } = require('../socketState');
 
 const router = express.Router();
 
@@ -20,8 +20,9 @@ router.get('/server-information', (req, res) => {
     ip: addresses[0] || '127.0.0.1',
     port,
     all_ips: addresses,
-    serverSockets: serverSockets.map(s => ({ url: s.url, connected: s.socket.connected }))
+    connections: connections.map(c => ({ url: c.url, status: c.status, mode: c.mode }))
   });
 });
 
 module.exports = router;
+

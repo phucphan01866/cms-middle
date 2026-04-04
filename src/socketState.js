@@ -2,10 +2,11 @@
 const { Server } = require('socket.io');
 
 /**
- * serverSockets: MẢNG chứa các instance socket client.
- * Lưu trữ các kết nối mà máy này chủ động kết nối tới các "Máy chủ" khác (Upstream).
+ * connections: MẢNG chứa metadata các server đã đăng ký kết nối.
+ * Mỗi entry: { url, ip, port, mode, status, server_id, receivedCount, sentCount }
+ * Không chứa socket instance — forward qua HTTP POST.
  */
-const serverSockets = [];
+const connections = [];
 
 /**
  * clientSockets: INSTANCE của Socket.io Server.
@@ -22,4 +23,4 @@ const init = (httpServer) => {
 
 const getClientSockets = () => clientSockets;
 
-module.exports = { init, getClientSockets, serverSockets };
+module.exports = { init, getClientSockets, connections };

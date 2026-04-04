@@ -1,5 +1,5 @@
 // ─── NOTIFICATION & CLIENT HELPERS ────────────────────────────────────────────
-const { getClientSockets, serverSockets } = require('../socketState');
+const { getClientSockets, connections } = require('../socketState');
 const { port } = require('../config');
 
 /**
@@ -15,10 +15,6 @@ const notifyStatusToClients = (url, mode, status, data = null) => {
   if (status === 'disconnected') eventName = 'external-disconnected';
   if (status === 'receive-log') eventName = 'receive-log';
   if (status === 'log-sent') eventName = 'log-sent';
-
-  // if (eventName === "receive-log") {
-  //   clientSockets.emit(eventName, data);
-  // }
 
   clientSockets.emit(eventName, { ...payload, data });
 };
@@ -55,23 +51,21 @@ const syncClientsToFrontend = async () => {
 };
 
 /**
- * Ngắt kết nối và xóa một socket client khỏi serverSockets.
+ * Xóa một connection khỏi danh sách connections (metadata only, no socket).
  */
-const removeServerSocket = (url) => {
-  const idx = serverSockets.findIndex(s => s.url === url);
+const removeConnection = (url) => {
+  const idx = connections.findIndex(c => c.url === url);
   if (idx === -1) {
-    console.log(`[REMOVE] Socket not found for URL: ${url}`);
-    return { success: false, message: 'Socket not found' };
+    console.log(`[REMOVE] Connection not found for URL: ${url}`);
+    return { success: false, message: 'Connection not found' };
   }
 
-  const entry = serverSockets[idx];
+  const entry = connections[idx];
   const mode = entry.mode;
 
-  entry.socket.removeAllListeners();
-  entry.socket.disconnect();
-  serverSockets.splice(idx, 1);
+  connections.splice(idx, 1);
 
-  console.log(`[REMOVE] Disconnected and removed socket: ${url} (mode: ${mode})`);
+  console.log(`[REMOVE] Removed connection: ${url} (mode: ${mode})`);
   notifyStatusToClients(url, mode, 'disconnected');
 
   return { success: true, message: `Removed ${url}` };
@@ -97,6 +91,6 @@ module.exports = {
   notifyStatusToClients,
   getActiveClients,
   syncClientsToFrontend,
-  removeServerSocket,
+  removeConnection,
   disconnectClientSocket,
 };

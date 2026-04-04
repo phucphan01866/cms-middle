@@ -1,4 +1,4 @@
-// ─── SOCKET SERVER EVENTS (Đón khách) ────────────────────────────────────────
+// ─── SOCKET SERVER EVENTS (BE↔FE only) ───────────────────────────────────────
 const { getClientSockets } = require('./socketState');
 const { syncClientsToFrontend } = require('./helpers/notify');
 
@@ -13,13 +13,6 @@ const setupSocketEvents = () => {
 
     // Sync client list to all connected frontends
     syncClientsToFrontend();
-
-    socket.on('forward-log', (data) => {
-      // Nhận log từ một máy khác (máy đó coi mình là server) -> Phát lại cho FE của mình
-      console.log(`[RECEIVE] Log received from node ${socket.id} — broadcasting to clients`);
-      clientSockets.emit('receive-log', data);
-      clientSockets.emit('log-dispatched', { timestamp: data.timestamp });
-    });
 
     socket.on('message', (data) => {
       console.log(`[MESSAGE] Received message from client ${socket.id} — broadcasting`);

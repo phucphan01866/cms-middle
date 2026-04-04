@@ -8,6 +8,7 @@ const getForwardURL = () => getURL(process.env.FORWARD_IP, process.env.FORWARD_P
 const declaredRoutes = [
   '/api/v1/login',
   '/api/v1/logs',
+  '/api/v1/forward-logs',
   '/healthcheck',
   '/api/v1/create-connection',
   '/api/v1/remove-connection',

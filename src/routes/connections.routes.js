@@ -1,18 +1,10 @@
 // ─── CONNECTION MANAGEMENT ROUTES ─────────────────────────────────────────────
 const express = require('express');
-const { io: ioClient } = require('socket.io-client');
-const { serverSockets } = require('../socketState');
-const { getCMSBackendURL } = require('../config');
-const { notifyStatusToClients, getActiveClients, removeServerSocket, disconnectClientSocket } = require('../helpers/notify');
+const axios = require('axios');
+const { connections } = require('../socketState');
+const { notifyStatusToClients, getActiveClients, removeConnection, disconnectClientSocket } = require('../helpers/notify');
 
 const router = express.Router();
-
-// Xóa kết nối socket (legacy endpoint)
-router.post('/remove-server', (req, res) => {
-  const { url } = req.body;
-  removeServerSocket(url);
-  res.send({ success: true });
-});
 
 // Ngắt kết nối một client đang kết nối vào server này (theo socketId)
 router.post('/api/v1/disconnect-client', async (req, res) => {
@@ -23,51 +15,42 @@ router.post('/api/v1/disconnect-client', async (req, res) => {
   return res.status(result.success ? 200 : 404).send(result);
 });
 
-// Khởi tạo kết nối làm "Khách" tới một server cấp trên khác
-router.post('/api/v1/create-connection', (req, res) => {
+// Đăng ký một target server để forward logs (chỉ lưu metadata, không tạo socket)
+router.post('/api/v1/create-connection', async (req, res) => {
   const { ip, port, mode } = req.body;
   console.log("create-connection to ", ip, port, mode);
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
 
   const url = `http://${ip}:${port}`;
-  const existing = serverSockets.find(s => s.url === url);
+  const existing = connections.find(c => c.url === url);
   if (existing) {
-    return res.status(200).send({ success: true, message: 'Already configured', connected: existing.socket.connected });
+    return res.status(200).send({ success: true, message: 'Already configured', status: existing.status });
   }
 
-  const newServerSocket = ioClient(url, {
-    reconnection: true,
-    reconnectionAttempts: Infinity,
-    reconnectionDelay: 2000,
-  });
-
   const connMode = mode || 'send';
+  let status = 'registered';
 
-  newServerSocket.on('connect', () => notifyStatusToClients(url, connMode, 'connected'));
-  newServerSocket.on('connect_error', () => notifyStatusToClients(url, connMode, 'error'));
-  newServerSocket.on('disconnect', () => {
-    console.log('removing', url);
-    const idx = serverSockets.findIndex(s => s.url === url);
-    if (idx !== -1) {
-      serverSockets.splice(idx, 1);
-    }
-    notifyStatusToClients(url, connMode, 'disconnected');
-  });
-  newServerSocket.on('receive-log', (data) => {
-    notifyStatusToClients(url, connMode, 'receive-log', data);
-  });
+  // Kiểm tra target server có online không bằng healthcheck
+  try {
+    await axios.get(`${url}/healthcheck`, { timeout: 3000 });
+    status = 'connected';
+  } catch {
+    status = 'unreachable';
+  }
 
-  serverSockets.push({ url, socket: newServerSocket, mode: connMode });
-  return res.status(200).send({ success: true, message: `${getCMSBackendURL()} telling ${url} to become a client`, ip, port });
+  connections.push({ url, ip, port, mode: connMode, status, server_id: 'PENDING', receivedCount: 0, sentCount: 0 });
+  notifyStatusToClients(url, connMode, status === 'connected' ? 'connected' : 'error');
+
+  return res.status(200).send({ success: true, message: `Registered ${url} (status: ${status})`, ip, port, status });
 });
 
-// Xóa kết nối socket client khỏi serverSockets
+// Xóa connection khỏi danh sách
 router.post('/api/v1/remove-connection', (req, res) => {
   const { ip, port } = req.body;
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
 
   const url = `http://${ip}:${port}`;
-  const result = removeServerSocket(url);
+  const result = removeConnection(url);
 
   return res.status(result.success ? 200 : 404).send(result);
 });
@@ -77,17 +60,14 @@ router.get('/api/v1/connections', async (req, res) => {
   // sendList = các client đang kết nối vào server này (FE, nodes cấp dưới)
   const sendList = (await getActiveClients()).map(({ mode, ...rest }) => rest);
 
-  // receiveList = các server mà máy này kết nối tới (upstream)
-  const receiveList = serverSockets.map(s => {
-    const parsed = new URL(s.url);
-    return {
-      ip: parsed.hostname,
-      port: parsed.port,
-      status: s.socket.connected ? 'connected' : 'disconnected',
-      server_id: s.server_id || 'PENDING',
-      receivedCount: s.receivedCount || 0,
-    };
-  });
+  // receiveList = các server đã đăng ký (metadata)
+  const receiveList = connections.map(c => ({
+    ip: c.ip,
+    port: c.port,
+    status: c.status,
+    server_id: c.server_id || 'PENDING',
+    receivedCount: c.receivedCount || 0,
+  }));
 
   res.json({ sendList, receiveList });
 });
