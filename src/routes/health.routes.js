@@ -6,8 +6,18 @@ const { connections } = require('../socketState');
 
 const router = express.Router();
 
+/**
+ * @route GET /healthcheck
+ * @description Simple health check endpoint.
+ * @returns {object} 200 - { status: 'OK' }
+ */
 router.get('/healthcheck', (req, res) => res.status(200).send({ status: 'OK' }));
 
+/**
+ * @route GET /server-information
+ * @description Provides network interface details and current registered connections.
+ * @returns {object} 200 - { ip: string, port: number, all_ips: Array, connections: Array }
+ */
 router.get('/server-information', (req, res) => {
   const interfaces = os.networkInterfaces();
   const addresses = [];

@@ -7,6 +7,12 @@ const { notifyStatusToClients } = require('../helpers/notify');
 const router = express.Router();
 
 // ─── Nhận log từ nguồn gốc (Camera, VMS, etc.) ──────────────────────────────
+/**
+ * @route POST /api/v1/logs
+ * @description Receives logs from sources, broadcasts to FE clients, and forwards to registered target servers.
+ * @body {object} logData.required - The log data to be processed.
+ * @returns {object} 200 - { success: true }
+ */
 router.post('/api/v1/logs', async (req, res) => {
   const clientSockets = getClientSockets();
 
@@ -78,6 +84,12 @@ router.post('/api/v1/logs', async (req, res) => {
 });
 
 // ─── Nhận log từ server khác (thay thế socket event 'forward-log') ───────────
+/**
+ * @route POST /api/v1/forward-logs
+ * @description Receives forwarded logs from another server and broadcasts them to local FE clients.
+ * @body {object} logData.required - The forwarded log data.
+ * @returns {object} 200 - { success: true }
+ */
 router.post('/api/v1/forward-logs', async (req, res) => {
   const clientSockets = getClientSockets();
 

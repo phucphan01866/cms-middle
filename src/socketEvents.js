@@ -2,6 +2,10 @@
 const { getClientSockets } = require('./socketState');
 const { syncClientsToFrontend } = require('./helpers/notify');
 
+/**
+ * Sets up Socket.IO event listeners for the client server.
+ * Handles 'connection', 'message', and 'disconnect' events.
+ */
 const setupSocketEvents = () => {
   const clientSockets = getClientSockets();
 

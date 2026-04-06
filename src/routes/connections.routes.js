@@ -7,6 +7,13 @@ const { notifyStatusToClients, getActiveClients, removeConnection, disconnectCli
 const router = express.Router();
 
 // Ngắt kết nối một client đang kết nối vào server này (theo socketId)
+/**
+ * @route POST /api/v1/disconnect-client
+ * @description Forcefully disconnects a connected socket client by its ID.
+ * @body {string} socketId.required - ID of the socket client to disconnect.
+ * @returns {object} 200 - { success: true, message: string }
+ * @returns {object} 404 - { success: false, message: string } - If socketId is not found.
+ */
 router.post('/api/v1/disconnect-client', async (req, res) => {
   const { socketId } = req.body;
   if (!socketId) return res.status(400).send({ success: false, message: 'Missing socketId' });
@@ -16,6 +23,14 @@ router.post('/api/v1/disconnect-client', async (req, res) => {
 });
 
 // Đăng ký một target server để forward logs (chỉ lưu metadata, không tạo socket)
+/**
+ * @route POST /api/v1/create-connection
+ * @description Registers a target server for log forwarding and checks its status.
+ * @body {string} ip.required - IP address of the target server.
+ * @body {number} port.required - Port number of the target server.
+ * @body {string} mode - Connection mode (default: 'send').
+ * @returns {object} 200 - { success: true, message: string, ip: string, port: number, status: string }
+ */
 router.post('/api/v1/create-connection', async (req, res) => {
   const { ip, port, mode } = req.body;
   console.log("create-connection to ", ip, port, mode);
@@ -45,6 +60,14 @@ router.post('/api/v1/create-connection', async (req, res) => {
 });
 
 // Xóa connection khỏi danh sách
+/**
+ * @route POST /api/v1/remove-connection
+ * @description Removes a registered connection from the connections list.
+ * @body {string} ip.required - IP of the connection to remove.
+ * @body {number} port.required - Port of the connection to remove.
+ * @returns {object} 200 - { success: true, message: string }
+ * @returns {object} 404 - { success: false, message: string } - If connection not found.
+ */
 router.post('/api/v1/remove-connection', (req, res) => {
   const { ip, port } = req.body;
   if (!ip || !port) return res.status(400).send({ success: false, message: 'Missing IP or Port' });
@@ -56,6 +79,11 @@ router.post('/api/v1/remove-connection', (req, res) => {
 });
 
 // Lấy danh sách connections (source of truth cho FE)
+/**
+ * @route GET /api/v1/connections
+ * @description Retrieves current connection list (active clients and registered servers).
+ * @returns {object} 200 - { sendList: Array, receiveList: Array }
+ */
 router.get('/api/v1/connections', async (req, res) => {
   // sendList = các client đang kết nối vào server này (FE, nodes cấp dưới)
   const sendList = (await getActiveClients()).map(({ mode, ...rest }) => rest);

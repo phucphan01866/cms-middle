@@ -3,7 +3,14 @@ const { getClientSockets, connections } = require('../socketState');
 const { port } = require('../config');
 
 /**
- * Emit trạng thái kết nối external server cho tất cả FE clients.
+ * Emit trạng thái kết nối external server cho tất cả FE clients - general
+ */
+/**
+ * Emit connection status of an external server to all FE clients.
+ * @param {string} url - The URL of the external server.
+ * @param {string} mode - The connection mode ('send', etc.).
+ * @param {string} status - The status ('connected', 'error', 'disconnected').
+ * @param {any} data - Optional data to include in the payload.
  */
 const notifyStatusToClients = (url, mode, status, data = null) => {
   const clientSockets = getClientSockets();
@@ -20,7 +27,11 @@ const notifyStatusToClients = (url, mode, status, data = null) => {
 };
 
 /**
- * Lấy danh sách các client đang kết nối vào server này.
+ * Lấy danh sách các client đang kết nối vào server này - bỏ
+ */
+/**
+ * Get detailed information about all currently connected socket clients.
+ * @returns {Promise<Array>} List of client objects { socketId, ip, port, status, mode, sentCount }.
  */
 const getActiveClients = async () => {
   const clientSockets = getClientSockets();
@@ -42,7 +53,10 @@ const getActiveClients = async () => {
 };
 
 /**
- * Sync danh sách clients hiện tại cho tất cả FE.
+ \* Sync danh sách clients hiện tại cho tất cả FE 
+ */
+/**
+ * Sync the current active client list to all connected frontends.
  */
 const syncClientsToFrontend = async () => {
   const clientSockets = getClientSockets();
@@ -51,7 +65,12 @@ const syncClientsToFrontend = async () => {
 };
 
 /**
- * Xóa một connection khỏi danh sách connections (metadata only, no socket).
+ * Xóa một connection khỏi danh sách connections (metadata only, no socket)
+ */
+/**
+ * Remove a connection from the global connections array and notify clients.
+ * @param {string} url - The URL of the connection to remove.
+ * @returns {object} { success: boolean, message: string }
  */
 const removeConnection = (url) => {
   const idx = connections.findIndex(c => c.url === url);
@@ -73,6 +92,11 @@ const removeConnection = (url) => {
 
 /**
  * Ngắt kết nối một client đang kết nối vào server này (theo socketId).
+ */
+/**
+ * Forcefully disconnect a client socket by its ID.
+ * @param {string} socketId - The ID of the socket to disconnect.
+ * @returns {Promise<object>} { success: boolean, message: string }
  */
 const disconnectClientSocket = async (socketId) => {
   const clientSockets = getClientSockets();
